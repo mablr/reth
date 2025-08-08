@@ -3,6 +3,10 @@
 //! clap [Args](clap::Args) for optimism rollup configuration
 
 use op_alloy_consensus::interop::SafetyLevel;
+use reth_ethereum_forks::ForkCondition;
+use reth_node_core::args::{ApplyHardforkOverrides, EthereumHardforkOverrideArgs};
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_forks::OpHardfork;
 use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 
 /// Parameters for rollup configuration
@@ -66,6 +70,42 @@ pub struct RollupArgs {
     /// Minimum suggested priority fee (tip) in wei, default `1_000_000`
     #[arg(long, default_value_t = 1_000_000)]
     pub min_suggested_priority_fee: u64,
+
+    /// Ethereum hardfork override flags
+    #[command(flatten)]
+    pub eth_overrides: EthereumHardforkOverrideArgs,
+
+    /// Override Canyon OP hardfork activation timestamp
+    #[arg(long = "override.canyon", value_name = "TIMESTAMP")]
+    pub canyon: Option<u64>,
+
+    /// Override Ecotone OP hardfork activation timestamp
+    #[arg(long = "override.ecotone", value_name = "TIMESTAMP")]
+    pub ecotone: Option<u64>,
+
+    /// Override Fjord OP hardfork activation timestamp
+    #[arg(long = "override.fjord", value_name = "TIMESTAMP")]
+    pub fjord: Option<u64>,
+
+    /// Override Granite OP hardfork activation timestamp
+    #[arg(long = "override.granite", value_name = "TIMESTAMP")]
+    pub granite: Option<u64>,
+
+    /// Override Holocene OP hardfork activation timestamp
+    #[arg(long = "override.holocene", value_name = "TIMESTAMP")]
+    pub holocene: Option<u64>,
+
+    /// Override Isthmus OP hardfork activation timestamp
+    #[arg(long = "override.isthmus", value_name = "TIMESTAMP")]
+    pub isthmus: Option<u64>,
+
+    /// Override Jovian OP hardfork activation timestamp
+    #[arg(long = "override.jovian", value_name = "TIMESTAMP")]
+    pub jovian: Option<u64>,
+
+    /// Override Interop OP hardfork activation timestamp
+    #[arg(long = "override.interop", value_name = "TIMESTAMP")]
+    pub interop: Option<u64>,
 }
 
 impl Default for RollupArgs {
@@ -81,7 +121,41 @@ impl Default for RollupArgs {
             sequencer_headers: Vec::new(),
             historical_rpc: None,
             min_suggested_priority_fee: 1_000_000,
+            eth_overrides: Default::default(),
+            canyon: None,
+            ecotone: None,
+            fjord: None,
+            granite: None,
+            holocene: None,
+            isthmus: None,
+            jovian: None,
+            interop: None,
         }
+    }
+}
+
+impl ApplyHardforkOverrides<OpChainSpec> for RollupArgs {
+    fn apply_hardfork_overrides(&self, spec: &mut OpChainSpec) {
+        // ETH overrides
+        self.eth_overrides.apply_to(|hf, cond| {
+            spec.inner.hardforks.insert(hf, cond);
+        });
+
+        // OP-specific overrides mapped directly
+        let mut set_op = |op: OpHardfork, ts_opt: Option<u64>| {
+            if let Some(ts) = ts_opt {
+                spec.inner.hardforks.insert(op, ForkCondition::Timestamp(ts));
+            }
+        };
+
+        set_op(OpHardfork::Canyon, self.canyon);
+        set_op(OpHardfork::Ecotone, self.ecotone);
+        set_op(OpHardfork::Fjord, self.fjord);
+        set_op(OpHardfork::Granite, self.granite);
+        set_op(OpHardfork::Holocene, self.holocene);
+        set_op(OpHardfork::Isthmus, self.isthmus);
+        set_op(OpHardfork::Jovian, self.jovian);
+        set_op(OpHardfork::Interop, self.interop);
     }
 }
 
@@ -167,6 +241,42 @@ mod tests {
             "--rollup.enable-tx-conditional",
             "--rollup.sequencer-http",
             "http://host:port",
+        ])
+        .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_hardfork_overrides() {
+        let expected_args = RollupArgs {
+            canyon: Some(1),
+            ecotone: Some(2),
+            fjord: Some(3),
+            granite: Some(4),
+            holocene: Some(5),
+            isthmus: Some(6),
+            jovian: Some(7),
+            interop: Some(8),
+            ..Default::default()
+        };
+        let args = CommandParser::<RollupArgs>::parse_from([
+            "reth",
+            "--override.canyon",
+            "1",
+            "--override.ecotone",
+            "2",
+            "--override.fjord",
+            "3",
+            "--override.granite",
+            "4",
+            "--override.holocene",
+            "5",
+            "--override.isthmus",
+            "6",
+            "--override.jovian",
+            "7",
+            "--override.interop",
+            "8",
         ])
         .args;
         assert_eq!(args, expected_args);

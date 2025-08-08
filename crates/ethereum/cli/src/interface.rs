@@ -8,7 +8,7 @@ use reth_cli_commands::{
     common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
-    node::{self, NoArgs},
+    node::{self},
     p2p, prune, re_execute, recover, stage,
 };
 use reth_cli_runner::CliRunner;
@@ -16,7 +16,7 @@ use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::LogArgs,
+    args::{ApplyHardforkOverrides, EthereumExtArgs, LogArgs},
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
@@ -30,8 +30,10 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
-{
+pub struct Cli<
+    C: ChainSpecParser = EthereumChainSpecParser,
+    Ext: clap::Args + fmt::Debug = EthereumExtArgs,
+> {
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<C, Ext>,
@@ -105,6 +107,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
+        Ext: ApplyHardforkOverrides<C::ChainSpec>,
     {
         self.with_runner(CliRunner::try_default_runtime()?, launcher)
     }
@@ -126,6 +129,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     where
         N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+        Ext: ApplyHardforkOverrides<C::ChainSpec>,
     {
         self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
     }
@@ -154,6 +158,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
+        Ext: ApplyHardforkOverrides<C::ChainSpec>,
     {
         let components = |spec: Arc<C::ChainSpec>| {
             (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
@@ -180,6 +185,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     where
         N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+        Ext: ApplyHardforkOverrides<C::ChainSpec>,
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
@@ -335,7 +341,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<EthereumChainSpecParser, NoArgs>::command();
+        let reth = Cli::<EthereumChainSpecParser, reth_node_core::args::EthereumExtArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()

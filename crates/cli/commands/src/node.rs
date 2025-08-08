@@ -137,8 +137,8 @@ impl<C: ChainSpecParser> NodeCommand<C> {
 impl<C, Ext> NodeCommand<C, Ext>
 where
     C: ChainSpecParser,
-    C::ChainSpec: EthChainSpec + EthereumHardforks,
-    Ext: clap::Args + fmt::Debug,
+    C::ChainSpec: EthChainSpec + EthereumHardforks + Clone,
+    Ext: clap::Args + fmt::Debug + reth_node_core::args::ApplyHardforkOverrides<C::ChainSpec>,
 {
     /// Launches the node
     ///
@@ -199,6 +199,13 @@ where
             node_config = node_config.with_unused_ports();
         }
 
+        // Apply hardfork overrides provided by the extension args by mapping the chainspec.
+        let node_config = node_config.map_chainspec(|chain| {
+            let mut spec = (*chain).clone();
+            reth_node_core::args::ApplyHardforkOverrides::apply_hardfork_overrides(&ext, &mut spec);
+            spec
+        });
+
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
             .with_launch_context(ctx.task_executor);
@@ -217,6 +224,9 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
 #[derive(Debug, Clone, Copy, Default, Args)]
 #[non_exhaustive]
 pub struct NoArgs;
+
+// Allow using the default `NoArgs` extension without overrides by providing a no-op implementation.
+impl<CS> reth_node_core::args::ApplyHardforkOverrides<CS> for NoArgs {}
 
 #[cfg(test)]
 mod tests {

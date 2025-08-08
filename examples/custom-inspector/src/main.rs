@@ -116,6 +116,12 @@ impl RethCliTxpoolExt {
     }
 }
 
+// Satisfy CLI bound: examples don't override hardforks.
+impl reth_ethereum::node::core::args::ApplyHardforkOverrides<reth_ethereum::chainspec::ChainSpec>
+    for RethCliTxpoolExt
+{
+}
+
 /// A dummy inspector that logs the opcodes and their corresponding program counter for a
 /// transaction
 #[derive(Default, Debug, Clone)]

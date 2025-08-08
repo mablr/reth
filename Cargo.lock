@@ -9314,6 +9314,7 @@ dependencies = [
  "reth-db",
  "reth-e2e-test-utils",
  "reth-engine-local",
+ "reth-ethereum-forks",
  "reth-evm",
  "reth-network",
  "reth-network-api",

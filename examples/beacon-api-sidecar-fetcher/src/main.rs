@@ -82,6 +82,12 @@ pub struct BeaconSidecarConfig {
     pub cl_port: u16,
 }
 
+// Satisfy CLI bound used by examples: no hardfork override behavior.
+impl reth_ethereum::node::core::args::ApplyHardforkOverrides<reth_ethereum::chainspec::ChainSpec>
+    for BeaconSidecarConfig
+{
+}
+
 impl Default for BeaconSidecarConfig {
     /// Default setup for lighthouse client
     fn default() -> Self {

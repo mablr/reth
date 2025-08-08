@@ -51,6 +51,12 @@ struct BeaconEventsConfig {
     pub cl_port: u16,
 }
 
+// Satisfy CLI bound for examples.
+impl reth_ethereum::node::core::args::ApplyHardforkOverrides<reth_ethereum::chainspec::ChainSpec>
+    for BeaconEventsConfig
+{
+}
+
 impl BeaconEventsConfig {
     /// Returns the http url of the beacon node
     pub fn http_base_url(&self) -> String {

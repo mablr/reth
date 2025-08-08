@@ -48,7 +48,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::LogArgs,
+    args::{ApplyHardforkOverrides, LogArgs},
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_optimism_node::args::RollupArgs;
@@ -92,7 +92,7 @@ impl Cli {
 impl<C, Ext> Cli<C, Ext>
 where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
-    Ext: clap::Args + fmt::Debug,
+    Ext: clap::Args + fmt::Debug + ApplyHardforkOverrides<OpChainSpec>,
 {
     /// Configures the CLI and returns a [`CliApp`] instance.
     ///

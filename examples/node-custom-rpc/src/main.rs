@@ -69,6 +69,12 @@ struct RethCliTxpoolExt {
     pub enable_ext: bool,
 }
 
+// Satisfy CLI bound: examples don't override hardforks.
+impl reth_ethereum::node::core::args::ApplyHardforkOverrides<reth_ethereum::chainspec::ChainSpec>
+    for RethCliTxpoolExt
+{
+}
+
 /// trait interface for a custom rpc namespace: `txpool`
 ///
 /// This defines an additional namespace where all methods are configured as trait functions.

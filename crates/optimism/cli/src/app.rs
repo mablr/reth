@@ -23,7 +23,7 @@ pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
 impl<C, Ext> CliApp<C, Ext>
 where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
-    Ext: clap::Args + fmt::Debug,
+    Ext: clap::Args + fmt::Debug + reth_node_core::args::ApplyHardforkOverrides<OpChainSpec>,
 {
     pub(crate) fn new(cli: Cli<C, Ext>) -> Self {
         Self { cli, runner: None, layers: Some(Layers::new()), guard: None }

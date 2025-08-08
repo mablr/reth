@@ -79,3 +79,9 @@ impl RethCliTxpoolExt {
         self.recipients.is_empty() || self.recipients.contains(recipient)
     }
 }
+
+// Satisfy CLI bound: examples don't override hardforks.
+impl reth_ethereum::node::core::args::ApplyHardforkOverrides<reth_ethereum::chainspec::ChainSpec>
+    for RethCliTxpoolExt
+{
+}
