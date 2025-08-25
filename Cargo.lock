@@ -10637,6 +10637,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "parking_lot",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-chainspec",
