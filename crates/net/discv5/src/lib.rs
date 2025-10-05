@@ -320,10 +320,8 @@ impl Discv5 {
             return None
         }
 
-        // todo: extend for all network stacks in reth-network rlpx logic
-        let fork_id = (self.fork_key == Some(NetworkStackId::ETH))
-            .then(|| self.get_fork_id(enr).ok())
-            .flatten();
+        // Get fork_id for any configured network stack (ETH, OPEL, etc.)
+        let fork_id = self.fork_key.is_some().then(|| self.get_fork_id(enr).ok()).flatten();
 
         trace!(target: "net::discv5",
             ?fork_id,
@@ -900,5 +898,161 @@ mod test {
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
+    }
+
+    #[test]
+    fn discovered_peer_fork_id_all_network_stacks() {
+        reth_tracing::init_test_tracing();
+
+        const REMOTE_RLPX_PORT: u16 = 30303;
+        let remote_socket = "104.28.44.25:9000".parse().unwrap();
+        let fork_id = MAINNET.latest_fork_id();
+
+        // Test ETH network stack
+        {
+            let remote_key = CombinedKey::generate_secp256k1();
+            let mut builder = Enr::builder();
+            builder.tcp4(REMOTE_RLPX_PORT);
+            builder.add_value_rlp(
+                NetworkStackId::ETH,
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+            );
+            let remote_enr = builder.build(&remote_key).unwrap();
+
+            let mut discv5 = discv5_noop();
+            discv5.fork_key = Some(NetworkStackId::ETH);
+
+            let discovered = discv5.on_discovered_peer(&remote_enr, remote_socket);
+            assert!(discovered.is_some());
+            let discovered = discovered.unwrap();
+            assert_eq!(discovered.fork_id, Some(fork_id));
+        }
+
+        // Test OPEL network stack
+        {
+            let remote_key = CombinedKey::generate_secp256k1();
+            let mut builder = Enr::builder();
+            builder.tcp4(REMOTE_RLPX_PORT);
+            builder.add_value_rlp(
+                NetworkStackId::OPEL,
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+            );
+            let remote_enr = builder.build(&remote_key).unwrap();
+
+            let mut discv5 = discv5_noop();
+            discv5.fork_key = Some(NetworkStackId::OPEL);
+
+            let discovered = discv5.on_discovered_peer(&remote_enr, remote_socket);
+            assert!(discovered.is_some());
+            let discovered = discovered.unwrap();
+            assert_eq!(discovered.fork_id, Some(fork_id));
+        }
+
+        // Test no network stack configured
+        {
+            let remote_key = CombinedKey::generate_secp256k1();
+            let mut builder = Enr::builder();
+            builder.tcp4(REMOTE_RLPX_PORT);
+            builder.add_value_rlp(
+                NetworkStackId::ETH,
+                alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+            );
+            let remote_enr = builder.build(&remote_key).unwrap();
+
+            let discv5 = discv5_noop(); // fork_key is None
+
+            let discovered = discv5.on_discovered_peer(&remote_enr, remote_socket);
+            assert!(discovered.is_some());
+            let discovered = discovered.unwrap();
+            assert_eq!(discovered.fork_id, None);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fork_id_validation_across_network_stacks() {
+        reth_tracing::init_test_tracing();
+
+        let fork_id = MAINNET.latest_fork_id();
+
+        // Helper to start a node with a specific network stack and fork_id
+        async fn start_node_with_fork(
+            udp_port: u16,
+            network_stack: &'static [u8],
+            fork_id: ForkId,
+        ) -> (Discv5, mpsc::Receiver<discv5::Event>, NodeRecord) {
+            let secret_key = SecretKey::new(&mut thread_rng());
+            let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port}").parse().unwrap();
+            let rlpx_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
+
+            let discv5_listen_config = ListenConfig::from(discv5_addr);
+            let discv5_config = Config::builder(rlpx_addr)
+                .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+                .fork(network_stack, fork_id)
+                .build();
+
+            Discv5::start(&secret_key, discv5_config).await.expect("should build discv5")
+        }
+
+        // Test 1: ETH network stack discovers peer with correct fork_id
+        trace!(target: "net::discv5::test", "Test 1: ETH network stack");
+        let (eth_node, _stream, _) =
+            start_node_with_fork(30400, NetworkStackId::ETH, fork_id).await;
+
+        // Create a remote ETH peer with fork_id
+        let remote_eth_key = CombinedKey::generate_secp256k1();
+        let mut eth_builder = Enr::builder();
+        eth_builder.tcp4(30303);
+        eth_builder.add_value_rlp(
+            NetworkStackId::ETH,
+            alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+        );
+        let remote_eth_enr = eth_builder.build(&remote_eth_key).unwrap();
+        let remote_socket = "192.168.1.100:9000".parse().unwrap();
+
+        let discovered = eth_node.on_discovered_peer(&remote_eth_enr, remote_socket);
+        assert!(discovered.is_some(), "ETH peer should be discovered");
+        let discovered = discovered.unwrap();
+        assert_eq!(discovered.fork_id, Some(fork_id), "Fork ID should match for ETH");
+
+        // Test 2: OPEL network stack discovers peer with correct fork_id
+        trace!(target: "net::discv5::test", "Test 2: OPEL network stack");
+        let (opel_node, _stream, _) =
+            start_node_with_fork(30401, NetworkStackId::OPEL, fork_id).await;
+
+        // Create a remote OPEL peer with fork_id
+        let remote_opel_key = CombinedKey::generate_secp256k1();
+        let mut opel_builder = Enr::builder();
+        opel_builder.tcp4(30303);
+        opel_builder.add_value_rlp(
+            NetworkStackId::OPEL,
+            alloy_rlp::encode(EnrForkIdEntry::from(fork_id)).into(),
+        );
+        let remote_opel_enr = opel_builder.build(&remote_opel_key).unwrap();
+
+        let discovered = opel_node.on_discovered_peer(&remote_opel_enr, remote_socket);
+        assert!(discovered.is_some(), "OPEL peer should be discovered");
+        let discovered = discovered.unwrap();
+        assert_eq!(discovered.fork_id, Some(fork_id), "Fork ID should match for OPEL");
+
+        // Test 3: ETH node ignores OPEL fork_id (different network stack)
+        trace!(target: "net::discv5::test", "Test 3: Cross-network stack isolation");
+        let discovered = eth_node.on_discovered_peer(&remote_opel_enr, remote_socket);
+        assert!(discovered.is_some(), "Peer should still be discovered");
+        // Fork ID should be None because ETH node can't read OPEL fork key
+        assert_eq!(discovered.unwrap().fork_id, None, "ETH node should not extract OPEL fork_id");
+
+        // Test 4: Node without network stack configured
+        trace!(target: "net::discv5::test", "Test 4: No network stack configured");
+        let (no_fork_node, _stream, _) = start_discovery_node(30402).await;
+
+        let discovered = no_fork_node.on_discovered_peer(&remote_eth_enr, remote_socket);
+        assert!(discovered.is_some(), "Peer should be discovered without fork validation");
+        assert_eq!(
+            discovered.unwrap().fork_id,
+            None,
+            "No fork_id should be extracted when network stack not configured"
+        );
+
+        trace!(target: "net::discv5::test", "All fork_id validation tests passed!");
     }
 }
