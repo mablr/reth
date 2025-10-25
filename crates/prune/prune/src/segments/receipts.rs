@@ -118,11 +118,15 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{
+        providers::StaticFileWriter, DBProvider, DatabaseProviderFactory, PruneCheckpointReader,
+        StaticFileProviderFactory,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
     };
@@ -256,21 +260,18 @@ mod tests {
     }
 
     #[test]
-    fn prune_receipts_from_static_files() {
+    fn prune_receipts_with_static_files() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        // Create blocks with transactions
         let blocks = random_block_range(
             &mut rng,
             0..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
 
-        // Insert blocks into database first
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        // Create receipts for all transactions
         let mut receipts = Vec::new();
         for block in &blocks {
             for transaction in &block.body().transactions {
@@ -281,18 +282,94 @@ mod tests {
             }
         }
 
-        // Insert receipts into database
         db.insert_receipts(receipts.clone()).expect("insert receipts");
 
-        // Move receipts to static files
-        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert into static files");
+        {
+            let static_file_provider = db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            for (block_num, block) in blocks.iter().enumerate() {
+                writer.increment_block(block_num as u64).unwrap();
+                for (tx_idx, _) in block.body().transactions.iter().enumerate() {
+                    let receipt_idx = blocks
+                        .iter()
+                        .take(block_num)
+                        .map(|b| b.transaction_count())
+                        .sum::<usize>() +
+                        tx_idx;
+                    writer.append_receipt(receipt_idx as u64, &receipts[receipt_idx].1).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
 
-        // Verify receipts are in the database (before moving to static files exclusively)
-        let initial_db_receipts = db.table::<tables::Receipts>().unwrap().len();
-        assert_eq!(initial_db_receipts, receipts.len());
+        let prune_mode = PruneMode::Distance(5);
+        let tip_block = blocks.last().unwrap().number;
+        let to_block = tip_block.saturating_sub(5);
 
-        // Test pruning with checkpoint alignment to static files
-        let prune_mode = PruneMode::Distance(5); // Keep only last 5 blocks
+        let expected_pruned: usize =
+            blocks.iter().take((to_block + 1) as usize).map(|b| b.transaction_count()).sum();
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block,
+            limiter: PruneLimiter::default().set_deleted_entries_limit(1000),
+        };
+
+        let result = super::prune(&provider, input).unwrap();
+
+        // Verify database receipts were pruned
+        assert_eq!(result.pruned, expected_pruned, "Should prune receipts from database");
+        assert_matches!(result.progress, PruneProgress::Finished);
+
+        super::save_checkpoint(
+            &provider,
+            result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+        )
+        .unwrap();
+        provider.commit().expect("commit");
+
+        // Verify database is pruned
+        let remaining = db.table::<tables::Receipts>().unwrap().len();
+        assert_eq!(remaining, receipts.len() - expected_pruned);
+
+        // Note: Static file receipts remain (forward pruning not yet implemented)
+    }
+
+    #[test]
+    fn prune_receipts_no_static_files() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let mut receipts = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body().transactions {
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0), None),
+                ));
+            }
+        }
+        db.insert_receipts(receipts.clone()).expect("insert receipts");
+
+        // Verify no static files exist
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts),
+            None,
+            "No static files should exist initially"
+        );
+
+        let prune_mode = PruneMode::Distance(5);
         let tip_block = blocks.last().unwrap().number;
         let to_block = tip_block.saturating_sub(5);
 
@@ -305,11 +382,79 @@ mod tests {
 
         let result = super::prune(&provider, input).unwrap();
 
-        // Verify some receipts were pruned
-        assert!(result.pruned > 0, "Expected receipts to be pruned");
+        assert!(result.pruned > 0, "Should prune receipts from database");
         assert_matches!(result.progress, PruneProgress::Finished);
 
-        // Save checkpoint
+        super::save_checkpoint(
+            &provider,
+            result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+        )
+        .unwrap();
+        provider.commit().expect("commit");
+    }
+
+    #[test]
+    fn prune_receipts_partial_with_limit() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let mut receipts = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body().transactions {
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0), None),
+                ));
+            }
+        }
+        db.insert_receipts(receipts.clone()).expect("insert receipts");
+
+        {
+            let static_file_provider = db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            for (block_num, block) in blocks.iter().enumerate() {
+                writer.increment_block(block_num as u64).unwrap();
+                for (tx_idx, _) in block.body().transactions.iter().enumerate() {
+                    let receipt_idx = blocks
+                        .iter()
+                        .take(block_num)
+                        .map(|b| b.transaction_count())
+                        .sum::<usize>() +
+                        tx_idx;
+                    writer.append_receipt(receipt_idx as u64, &receipts[receipt_idx].1).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+
+        let prune_mode = PruneMode::Distance(5);
+        let tip_block = blocks.last().unwrap().number;
+        let to_block = tip_block.saturating_sub(5);
+
+        // First run with small limit - should not complete
+        let provider = db.factory.database_provider_rw().unwrap();
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block,
+            limiter: PruneLimiter::default().set_deleted_entries_limit(5),
+        };
+
+        let result = super::prune(&provider, input).unwrap();
+        assert_eq!(result.pruned, 5, "Should prune exactly 5 receipts");
+        assert_matches!(
+            result.progress,
+            PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached)
+        );
+
         super::save_checkpoint(
             &provider,
             result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
@@ -317,10 +462,96 @@ mod tests {
         .unwrap();
         provider.commit().expect("commit");
 
-        // Verify checkpoint was saved correctly
+        // Second run to complete pruning
+        let provider = db.factory.database_provider_rw().unwrap();
         let checkpoint =
-            db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Receipts).unwrap();
-        assert!(checkpoint.is_some(), "Checkpoint should be saved");
-        assert!(checkpoint.unwrap().block_number.is_some(), "Checkpoint should have block number");
+            provider.get_prune_checkpoint(PruneSegment::Receipts).unwrap().unwrap();
+
+        let input = PruneInput {
+            previous_checkpoint: Some(checkpoint),
+            to_block,
+            limiter: PruneLimiter::default().set_deleted_entries_limit(1000),
+        };
+
+        let result = super::prune(&provider, input).unwrap();
+        assert!(result.pruned > 0, "Should prune remaining receipts");
+        assert_matches!(result.progress, PruneProgress::Finished);
+
+        super::save_checkpoint(
+            &provider,
+            result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+        )
+        .unwrap();
+        provider.commit().expect("commit");
+    }
+
+    #[test]
+    fn prune_checkpoint_alignment_with_static_files() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let mut receipts = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body().transactions {
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0), None),
+                ));
+            }
+        }
+        db.insert_receipts(receipts.clone()).expect("insert receipts");
+
+        // Write some receipts to static files
+        {
+            let static_file_provider = db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            // Only write first 5 blocks to static files
+            for (block_num, block) in blocks.iter().take(5).enumerate() {
+                writer.increment_block(block_num as u64).unwrap();
+                for (tx_idx, _) in block.body().transactions.iter().enumerate() {
+                    let receipt_idx = blocks
+                        .iter()
+                        .take(block_num)
+                        .map(|b| b.transaction_count())
+                        .sum::<usize>() +
+                        tx_idx;
+                    writer.append_receipt(receipt_idx as u64, &receipts[receipt_idx].1).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+
+        let prune_mode = PruneMode::Distance(8);
+        let tip_block = blocks.last().unwrap().number;
+        let to_block = tip_block.saturating_sub(8);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let input = PruneInput {
+            previous_checkpoint: None, // No previous checkpoint
+            to_block,
+            limiter: PruneLimiter::default().set_deleted_entries_limit(1000),
+        };
+
+        let result = super::prune(&provider, input).unwrap();
+
+        // Should still complete successfully with checkpoint alignment
+        assert_matches!(result.progress, PruneProgress::Finished);
+        assert!(result.pruned > 0, "Should prune some receipts");
+
+        super::save_checkpoint(
+            &provider,
+            result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+        )
+        .unwrap();
+        provider.commit().expect("commit");
     }
 }
