@@ -170,7 +170,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     prune_modes.clone(),
                     None,
                 ))
-                .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
+                .build(factory.clone(), StaticFileProducer::new(factory.clone()));
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;

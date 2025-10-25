@@ -507,10 +507,7 @@ where
                     self.prune_modes(),
                     None,
                 ))
-                .build(
-                    factory.clone(),
-                    StaticFileProducer::new(factory.clone(), self.prune_modes()),
-                );
+                .build(factory.clone(), StaticFileProducer::new(factory.clone()));
 
             // Unwinds to block
             let (tx, rx) = oneshot::channel();
@@ -828,7 +825,7 @@ where
     pub fn static_file_producer(
         &self,
     ) -> StaticFileProducer<ProviderFactory<NodeTypesWithDBAdapter<T::Types, T::DB>>> {
-        StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
+        StaticFileProducer::new(self.provider_factory().clone())
     }
 
     /// Returns the current head block.

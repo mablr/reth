@@ -662,7 +662,6 @@ mod tests {
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
-    use reth_prune::PruneModes;
     use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;
 
@@ -712,10 +711,7 @@ mod tests {
             .add_stage(stage_a)
             .add_stage(stage_b)
             .with_max_block(10)
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-            );
+            .build(provider_factory.clone(), StaticFileProducer::new(provider_factory.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -799,10 +795,7 @@ mod tests {
             .add_stage(stage_b)
             .add_stage(stage_c)
             .with_max_block(10)
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-            );
+            .build(provider_factory.clone(), StaticFileProducer::new(provider_factory.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -936,10 +929,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-            );
+            .build(provider_factory.clone(), StaticFileProducer::new(provider_factory.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -1046,10 +1036,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-            );
+            .build(provider_factory.clone(), StaticFileProducer::new(provider_factory.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -1153,10 +1140,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-            );
+            .build(provider_factory.clone(), StaticFileProducer::new(provider_factory.clone()));
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
@@ -1166,10 +1150,7 @@ mod tests {
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
-            );
+            .build(provider_factory.clone(), StaticFileProducer::new(provider_factory.clone()));
         let result = pipeline.run().await;
         assert_matches!(
             result,

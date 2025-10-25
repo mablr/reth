@@ -24,8 +24,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
 
         // Copy data from database to static files
         info!(target: "reth::cli", "Copying data from database to static files...");
-        let static_file_producer =
-            StaticFileProducer::new(provider_factory.clone(), config.segments.clone());
+        let static_file_producer = StaticFileProducer::new(provider_factory.clone());
         let lowest_static_file_height =
             static_file_producer.lock().copy_to_static_files()?.min_block_num();
         info!(target: "reth::cli", ?lowest_static_file_height, "Copied data from database to static files");

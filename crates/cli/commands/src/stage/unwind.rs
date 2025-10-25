@@ -128,10 +128,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             )
         };
 
-        let pipeline = builder.build(
-            provider_factory.clone(),
-            StaticFileProducer::new(provider_factory, prune_modes),
-        );
+        let pipeline =
+            builder.build(provider_factory.clone(), StaticFileProducer::new(provider_factory));
         Ok(pipeline)
     }
 }

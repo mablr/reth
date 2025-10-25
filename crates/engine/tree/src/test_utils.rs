@@ -6,7 +6,6 @@ use reth_primitives_traits::SealedHeader;
 use reth_provider::test_utils::{
     create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
 };
-use reth_prune_types::PruneModes;
 use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
 use reth_stages_api::Pipeline;
 use reth_static_file::StaticFileProducer;
@@ -58,8 +57,7 @@ impl TestPipelineBuilder {
 
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
-        let static_file_producer =
-            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
+        let static_file_producer = StaticFileProducer::new(provider_factory.clone());
 
         pipeline.build(provider_factory, static_file_producer)
     }

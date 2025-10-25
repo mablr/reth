@@ -102,8 +102,7 @@ where
         .sealed_header(provider_factory.last_block_number()?)?
         .expect("should have genesis");
 
-    let static_file_producer =
-        StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
+    let static_file_producer = StaticFileProducer::new(provider_factory.clone());
 
     while let Some(file_client) =
         reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?

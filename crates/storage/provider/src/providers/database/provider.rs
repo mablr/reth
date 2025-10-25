@@ -361,20 +361,22 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         from_tx: TxNumber,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
-        // iterate over block body and remove receipts
+        // Remove receipts from database
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if !self.prune_modes.has_receipts_pruning() {
-            let static_file_receipt_num =
-                self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
+        // Always prune receipts from static files when unwinding, regardless of prune config.
+        // The static file pruner will handle configured pruning separately.
+        let static_file_receipt_num =
+            self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
-            let to_delete = static_file_receipt_num
-                .map(|static_num| (static_num + 1).saturating_sub(from_tx))
-                .unwrap_or_default();
+        if let Some(static_num) = static_file_receipt_num {
+            let to_delete = (static_num + 1).saturating_sub(from_tx);
 
-            self.static_file_provider
-                .latest_writer(StaticFileSegment::Receipts)?
-                .prune_receipts(to_delete, last_block)?;
+            if to_delete > 0 {
+                self.static_file_provider
+                    .latest_writer(StaticFileSegment::Receipts)?
+                    .prune_receipts(to_delete, last_block)?;
+            }
         }
 
         Ok(())

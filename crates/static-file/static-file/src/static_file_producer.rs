@@ -11,7 +11,6 @@ use reth_provider::{
     providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
-use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
 use reth_static_file_types::{HighestStaticFiles, StaticFileTargets};
 use reth_storage_errors::provider::ProviderResult;
@@ -37,8 +36,8 @@ pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provid
 
 impl<Provider> StaticFileProducer<Provider> {
     /// Creates a new [`StaticFileProducer`].
-    pub fn new(provider: Provider, prune_modes: PruneModes) -> Self {
-        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider, prune_modes))))
+    pub fn new(provider: Provider) -> Self {
+        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider))))
     }
 }
 
@@ -62,16 +61,12 @@ impl<Provider> Deref for StaticFileProducer<Provider> {
 pub struct StaticFileProducerInner<Provider> {
     /// Provider factory
     provider: Provider,
-    /// Pruning configuration for every part of the data that can be pruned. Set by user, and
-    /// needed in [`StaticFileProducerInner`] to prevent attempting to move prunable data to static
-    /// files. See [`StaticFileProducerInner::get_static_file_targets`].
-    prune_modes: PruneModes,
     event_sender: EventSender<StaticFileProducerEvent>,
 }
 
 impl<Provider> StaticFileProducerInner<Provider> {
-    fn new(provider: Provider, prune_modes: PruneModes) -> Self {
-        Self { provider, prune_modes, event_sender: Default::default() }
+    fn new(provider: Provider) -> Self {
+        Self { provider, event_sender: Default::default() }
     }
 }
 
@@ -193,17 +188,11 @@ where
         let highest_static_files = self.provider.static_file_provider().get_highest_static_files();
 
         let targets = StaticFileTargets {
-            // StaticFile receipts only if they're not pruned according to the user configuration
-            receipts: if self.prune_modes.receipts.is_none() {
-                finalized_block_numbers.receipts.and_then(|finalized_block_number| {
-                    self.get_static_file_target(
-                        highest_static_files.receipts,
-                        finalized_block_number,
-                    )
-                })
-            } else {
-                None
-            },
+            // Always write receipts to static files. The pruner will handle removing old receipts
+            // from static files according to the user configuration.
+            receipts: finalized_block_numbers.receipts.and_then(|finalized_block_number| {
+                self.get_static_file_target(highest_static_files.receipts, finalized_block_number)
+            }),
         };
 
         trace!(
@@ -239,7 +228,6 @@ mod tests {
         providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
         ProviderFactory, StaticFileProviderFactory,
     };
-    use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
     use reth_testing_utils::generators::{
@@ -289,8 +277,7 @@ mod tests {
     fn run() {
         let (provider_factory, _temp_static_files_dir) = setup();
 
-        let static_file_producer =
-            StaticFileProducerInner::new(provider_factory.clone(), PruneModes::default());
+        let static_file_producer = StaticFileProducerInner::new(provider_factory.clone());
 
         let targets = static_file_producer
             .get_static_file_targets(HighestStaticFiles { receipts: Some(1) })
@@ -331,7 +318,7 @@ mod tests {
     fn only_one() {
         let (provider_factory, _temp_static_files_dir) = setup();
 
-        let static_file_producer = StaticFileProducer::new(provider_factory, PruneModes::default());
+        let static_file_producer = StaticFileProducer::new(provider_factory);
 
         let (tx, rx) = channel();
 
