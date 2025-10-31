@@ -1,8 +1,6 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH,
-};
+use alloy_consensus::{BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
@@ -259,14 +257,17 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
     Ok(())
 }
 
-/// Validates the header's extra data according to the beacon consensus rules.
+/// Validates the header's extra data does not exceed the specified size limit.
 ///
-/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
-/// This must be 32 bytes or fewer; formally Hx.
+/// Per the Ethereum specification, extraData is an arbitrary byte array containing
+/// data relevant to the block. This function enforces the configurable size constraint.
 #[inline]
-pub fn validate_header_extra_data<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+pub fn validate_header_extra_data<H: BlockHeader>(
+    header: &H,
+    max_extra_data_size: usize,
+) -> Result<(), ConsensusError> {
     let extra_data_len = header.extra_data().len();
-    if extra_data_len > MAXIMUM_EXTRA_DATA_SIZE {
+    if extra_data_len > max_extra_data_size {
         Err(ConsensusError::ExtraDataExceedsMax { len: extra_data_len })
     } else {
         Ok(())
@@ -436,7 +437,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{BlockBody, Header, TxEip4844};
+    use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockBody, Header, TxEip4844};
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{Address, Bytes, Signature, U256};
     use rand::Rng;
@@ -502,5 +503,22 @@ mod tests {
                 expected: expected_blob_gas_used
             }))
         );
+    }
+
+    #[test]
+    fn test_validate_header_extra_data_with_custom_limit() {
+        // Test with default limit (32 bytes)
+        let header_valid = Header { extra_data: vec![0u8; 32].into(), ..Default::default() };
+        assert!(validate_header_extra_data(&header_valid, MAXIMUM_EXTRA_DATA_SIZE).is_ok());
+
+        let header_invalid = Header { extra_data: vec![0u8; 33].into(), ..Default::default() };
+        assert!(validate_header_extra_data(&header_invalid, MAXIMUM_EXTRA_DATA_SIZE).is_err());
+
+        // Test with custom limit (64 bytes)
+        let header_valid = Header { extra_data: vec![0u8; 64].into(), ..Default::default() };
+        assert!(validate_header_extra_data(&header_valid, 64).is_ok());
+
+        let header_invalid = Header { extra_data: vec![0u8; 65].into(), ..Default::default() };
+        assert!(validate_header_extra_data(&header_invalid, 64).is_err());
     }
 }

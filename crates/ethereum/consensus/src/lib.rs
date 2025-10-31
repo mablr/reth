@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc};
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
@@ -38,17 +38,29 @@ pub use validation::validate_block_post_execution;
 pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
+    /// Maximum size of extra data in bytes
+    max_extra_data_size: usize,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
-    /// Create a new instance of [`EthBeaconConsensus`]
+    /// Create a new instance of [`EthBeaconConsensus`] with default max extra data size
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
+        Self { chain_spec, max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE }
+    }
+
+    /// Sets the maximum size of extra data.
+    pub fn with_max_extra_data_size(self, max_extra_data_size: usize) -> Self {
+        Self { chain_spec: self.chain_spec, max_extra_data_size }
     }
 
     /// Returns the chain spec associated with this consensus engine.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
+    }
+
+    /// Returns the maximum size of extra data.
+    pub const fn max_extra_data_size(&self) -> usize {
+        self.max_extra_data_size
     }
 }
 
@@ -125,7 +137,7 @@ where
                 }
             }
         }
-        validate_header_extra_data(header)?;
+        validate_header_extra_data(header, self.max_extra_data_size)?;
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
 
@@ -291,5 +303,40 @@ mod tests {
             EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal_slow(header,)),
             Ok(())
         );
+    }
+
+    #[test]
+    fn test_extra_data_validation_custom_limit() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
+
+        // Create consensus with custom limit (no extra data allowed)
+        let consensus = EthBeaconConsensus::new(chain_spec).with_max_extra_data_size(128);
+
+        // Test header with empty extra data (within custom limit)
+        let header_valid =
+            reth_primitives_traits::Header { extra_data: vec![].into(), ..Default::default() };
+
+        assert_eq!(consensus.validate_header(&SealedHeader::seal_slow(header_valid)), Ok(()));
+
+        // Test header with 129 bytes of extra data (exceeds custom limit)
+        let header_invalid = reth_primitives_traits::Header {
+            extra_data: vec![0u8; 129].into(),
+            ..Default::default()
+        };
+
+        assert!(consensus.validate_header(&SealedHeader::seal_slow(header_invalid)).is_err());
+    }
+
+    #[test]
+    fn test_eth_beacon_consensus_builder() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
+
+        // Test default max_extra_data_size
+        let consensus = EthBeaconConsensus::new(chain_spec.clone());
+        assert_eq!(consensus.max_extra_data_size(), MAXIMUM_EXTRA_DATA_SIZE);
+
+        // Test custom max_extra_data_size via builder
+        let consensus = EthBeaconConsensus::new(chain_spec).with_max_extra_data_size(128);
+        assert_eq!(consensus.max_extra_data_size(), 128);
     }
 }
