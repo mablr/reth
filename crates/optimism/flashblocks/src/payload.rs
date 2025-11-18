@@ -1,11 +1,15 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
+use alloy_primitives::{TxHash, B256};
 use derive_more::Deref;
+use op_alloy_consensus::OpReceipt;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_types::PendingBlock;
 
 /// Type alias for the Optimism flashblock payload.
 pub type FlashBlock = op_alloy_rpc_types_engine::OpFlashblockPayload;
+
+/// Type alias for the Optimism flashblock receipts.
+pub type FlashblockReceipts = Vec<(TxHash, OpReceipt)>;
 
 /// The pending block built with all received Flashblocks alongside the metadata for the last added
 /// Flashblock.
@@ -37,6 +41,16 @@ impl<N: NodePrimitives> PendingFlashBlock<N> {
     pub fn computed_state_root(&self) -> Option<B256> {
         self.has_computed_state_root.then_some(self.pending.block().state_root())
     }
+}
+
+/// Returns the receipts for a given flashblock.
+pub fn flashblock_receipts(flashblock: &FlashBlock) -> FlashblockReceipts {
+    flashblock
+        .metadata
+        .receipts
+        .iter()
+        .map(|(tx_hash, receipt)| (*tx_hash, receipt.clone()))
+        .collect()
 }
 
 #[cfg(test)]

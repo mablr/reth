@@ -24,9 +24,10 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    FlashBlockConsensusClient, FlashBlockRx, FlashBlockService, FlashblocksListeners,
-    PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    flashblock_receipts, FlashBlockBuildInfo, FlashBlockCompleteSequence,
+    FlashBlockCompleteSequenceRx, FlashBlockConsensusClient, FlashBlockRx, FlashBlockService,
+    FlashblockReceipts, FlashblocksListeners, PendingBlockRx, PendingFlashBlock,
+    WsFlashBlockStream,
 };
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
@@ -50,6 +51,7 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::watch, time};
+use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
 use tracing::info;
 
 /// Maximum duration to wait for a fresh flashblock when one is being built.
@@ -123,6 +125,14 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     /// Returns a new subscription to flashblock sequences.
     pub fn subscribe_flashblock_sequence(&self) -> Option<FlashBlockCompleteSequenceRx> {
         self.inner.flashblocks.as_ref().map(|f| f.flashblocks_sequence.subscribe())
+    }
+
+    /// Returns a stream of flashblock receipts, if any.
+    pub fn flashblock_receipts_stream(&self) -> Option<impl Stream<Item = FlashblockReceipts>> {
+        self.subscribe_received_flashblocks().map(|rx| {
+            BroadcastStream::new(rx)
+                .filter_map(move |fb| fb.ok().map(|fb| flashblock_receipts(&fb)))
+        })
     }
 
     /// Returns information about the flashblock currently being built, if any.

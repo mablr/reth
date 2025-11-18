@@ -18,7 +18,7 @@ mod consensus;
 pub use consensus::FlashBlockConsensusClient;
 
 mod payload;
-pub use payload::{FlashBlock, PendingFlashBlock};
+pub use payload::{flashblock_receipts, FlashBlock, FlashblockReceipts, PendingFlashBlock};
 
 mod sequence;
 pub use sequence::{FlashBlockCompleteSequence, FlashBlockPendingSequence};
