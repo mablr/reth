@@ -1,4 +1,5 @@
 use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
+use alloy_network::DynTransactionBuilder;
 use alloy_primitives::{bytes, Address, B256, U256};
 use alloy_provider::{
     network::{
