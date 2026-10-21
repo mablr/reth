@@ -216,7 +216,9 @@ where
         message: &Message<T>,
         gas: &mut GasTracker,
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
-        let address = message.code_address;
+        // evm2 dispatches native precompiles at the call target, even when it holds an EIP-7702
+        // delegation, so the cache is keyed by it too.
+        let address = message.call_target;
         if !self.policy.allows(&address) {
             return self.inner.execute(evm, message, gas);
         }
@@ -477,6 +479,7 @@ mod tests {
             kind: MessageKind::Call,
             gas_limit: 30_000,
             destination,
+            call_target: destination,
             code_address: destination,
             input: input.clone(),
             ..Default::default()
@@ -529,8 +532,8 @@ mod tests {
             caller: Address::ZERO,
             input: Bytes::copy_from_slice(b"cached-input"),
             value: U256::ZERO,
+            call_target: address,
             code_address: address,
-            disable_precompiles: false,
             salt: B256::ZERO,
             ..Default::default()
         };
@@ -578,6 +581,7 @@ mod tests {
                 kind: MessageKind::Call,
                 gas_limit: 30_000,
                 destination: address,
+                call_target: address,
                 code_address: address,
                 input: Bytes::from(vec![1; len]),
                 ..Default::default()
@@ -631,6 +635,7 @@ mod tests {
                 let message = Message::<BaseEvmTypes> {
                     caller,
                     destination: identity,
+                    call_target: identity,
                     code_address: identity,
                     gas_limit: 30_000,
                     ..Default::default()
